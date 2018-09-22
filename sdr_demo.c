@@ -34,49 +34,19 @@ static uint32_t samp_rate = DEFAULT_SAMPLE_RATE;
 
 static uint32_t total_samples = 0;
 static uint32_t dropped_samples = 0;
-static uint64_t curr_freq = 101500000;
+static uint64_t curr_freq = 109000000;
 
-/* Shader vars */
-static SDL_bool shaders_supported;
-static int      current_shader = 0;
-enum {
-    SHADER_COLOR,
-    NUM_SHADERS
+struct lineSegment
+{
+	GLfloat x, y;
 };
+static uint8_t *rtl_buffer;
+#define MAX_TIME_IN_GRAPH 24
+static lineSegment stuff[MAX_TIME_IN_GRAPH][1024];
+static int current_time = -1;
+static bool roll_time = false;
+static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 
-typedef struct {
-    GLhandleARB program;
-    GLhandleARB vert_shader;
-    GLhandleARB frag_shader;
-    const char *vert_source;
-    const char *frag_source;
-} ShaderData;
-
-static ShaderData shaders[NUM_SHADERS] = {
-
-    /* SHADER_COLOR */
-    { 0, 0, 0,
-        /* vertex shader */
-	    "#version 130\n"
-"in vec2 x_pos;\n"
-"in vec3 x_color;\n"
-"out vec3 v_color;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_Position = vec4(x_pos.x,x_pos.y,0,1.0);\n"//gl_ModelViewProjectionMatrix * gl_Vertex;\n"
-"    v_color = x_color;\n"
-"}",
-        /* fragment shader */
-"#version 130\n"
-"in vec3 v_color;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_FragColor = vec4(v_color;\n"
-"}"
-    },
-};
 
 static PFNGLATTACHOBJECTARBPROC glAttachObjectARB;
 static PFNGLCOMPILESHADERARBPROC glCompileShaderARB;
@@ -91,155 +61,6 @@ static PFNGLSHADERSOURCEARBPROC glShaderSourceARB;
 static PFNGLUNIFORM1IARBPROC glUniform1iARB;
 static PFNGLUSEPROGRAMOBJECTARBPROC glUseProgramObjectARB;
 
-static SDL_bool CompileShader(GLhandleARB shader, const char *source)
-{
-    GLint status;
-
-    glShaderSourceARB(shader, 1, &source, NULL);
-    glCompileShaderARB(shader);
-    glGetObjectParameterivARB(shader, GL_OBJECT_COMPILE_STATUS_ARB, &status);
-    if (status == 0) {
-        GLint length;
-        char *info;
-
-        glGetObjectParameterivARB(shader, GL_OBJECT_INFO_LOG_LENGTH_ARB, &length);
-        info = SDL_stack_alloc(char, length+1);
-        glGetInfoLogARB(shader, length, NULL, info);
-        SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Failed to compile shader:\n%s\n%s", source, info);
-        SDL_stack_free(info);
-
-        return SDL_FALSE;
-    } else {
-        return SDL_TRUE;
-    }
-}
-
-static SDL_bool CompileShaderProgram(ShaderData *data)
-{
-    const int num_tmus_bound = 4;
-    int i;
-    GLint location;
-
-    glGetError();
-
-    /* Create one program object to rule them all */
-    data->program = glCreateProgramObjectARB();
-
-    /* Create the vertex shader */
-    data->vert_shader = glCreateShaderObjectARB(GL_VERTEX_SHADER_ARB);
-    if (!CompileShader(data->vert_shader, data->vert_source)) {
-        return SDL_FALSE;
-    }
-
-    /* Create the fragment shader */
-    data->frag_shader = glCreateShaderObjectARB(GL_FRAGMENT_SHADER_ARB);
-    if (!CompileShader(data->frag_shader, data->frag_source)) {
-        return SDL_FALSE;
-    }
-
-    /* ... and in the darkness bind them */
-    glAttachObjectARB(data->program, data->vert_shader);
-    glAttachObjectARB(data->program, data->frag_shader);
-    glLinkProgramARB(data->program);
-
-    /* Set up some uniform variables */
-    glUseProgramObjectARB(data->program);
-    for (i = 0; i < num_tmus_bound; ++i) {
-        char tex_name[5];
-        SDL_snprintf(tex_name, SDL_arraysize(tex_name), "tex%d", i);
-        location = glGetUniformLocationARB(data->program, tex_name);
-        if (location >= 0) {
-            glUniform1iARB(location, i);
-        }
-    }
-    glUseProgramObjectARB(0);
-
-    return (glGetError() == GL_NO_ERROR) ? SDL_TRUE : SDL_FALSE;
-}
-
-static void DestroyShaderProgram(ShaderData *data)
-{
-    if (shaders_supported) {
-        glDeleteObjectARB(data->vert_shader);
-        glDeleteObjectARB(data->frag_shader);
-        glDeleteObjectARB(data->program);
-    }
-}
-
-static SDL_bool InitShaders()
-{
-    int i;
-
-    /* Check for shader support */
-    shaders_supported = SDL_FALSE;
-    if (SDL_GL_ExtensionSupported("GL_ARB_shader_objects") &&
-        SDL_GL_ExtensionSupported("GL_ARB_shading_language_100") &&
-        SDL_GL_ExtensionSupported("GL_ARB_vertex_shader") &&
-        SDL_GL_ExtensionSupported("GL_ARB_fragment_shader")) {
-        glAttachObjectARB = (PFNGLATTACHOBJECTARBPROC) SDL_GL_GetProcAddress("glAttachObjectARB");
-        glCompileShaderARB = (PFNGLCOMPILESHADERARBPROC) SDL_GL_GetProcAddress("glCompileShaderARB");
-        glCreateProgramObjectARB = (PFNGLCREATEPROGRAMOBJECTARBPROC) SDL_GL_GetProcAddress("glCreateProgramObjectARB");
-        glCreateShaderObjectARB = (PFNGLCREATESHADEROBJECTARBPROC) SDL_GL_GetProcAddress("glCreateShaderObjectARB");
-        glDeleteObjectARB = (PFNGLDELETEOBJECTARBPROC) SDL_GL_GetProcAddress("glDeleteObjectARB");
-        glGetInfoLogARB = (PFNGLGETINFOLOGARBPROC) SDL_GL_GetProcAddress("glGetInfoLogARB");
-        glGetObjectParameterivARB = (PFNGLGETOBJECTPARAMETERIVARBPROC) SDL_GL_GetProcAddress("glGetObjectParameterivARB");
-        glGetUniformLocationARB = (PFNGLGETUNIFORMLOCATIONARBPROC) SDL_GL_GetProcAddress("glGetUniformLocationARB");
-        glLinkProgramARB = (PFNGLLINKPROGRAMARBPROC) SDL_GL_GetProcAddress("glLinkProgramARB");
-        glShaderSourceARB = (PFNGLSHADERSOURCEARBPROC) SDL_GL_GetProcAddress("glShaderSourceARB");
-        glUniform1iARB = (PFNGLUNIFORM1IARBPROC) SDL_GL_GetProcAddress("glUniform1iARB");
-        glUseProgramObjectARB = (PFNGLUSEPROGRAMOBJECTARBPROC) SDL_GL_GetProcAddress("glUseProgramObjectARB");
-        if (glAttachObjectARB &&
-            glCompileShaderARB &&
-            glCreateProgramObjectARB &&
-            glCreateShaderObjectARB &&
-            glDeleteObjectARB &&
-            glGetInfoLogARB &&
-            glGetObjectParameterivARB &&
-            glGetUniformLocationARB &&
-            glLinkProgramARB &&
-            glShaderSourceARB &&
-            glUniform1iARB &&
-            glUseProgramObjectARB) {
-            shaders_supported = SDL_TRUE;
-        }
-    }
-
-    if (!shaders_supported) {
-        return SDL_FALSE;
-    }
-
-    /* Compile all the shaders */
-    for (i = 0; i < NUM_SHADERS; ++i) {
-        if (!CompileShaderProgram(&shaders[i])) {
-            SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to compile shader!\n");
-            return SDL_FALSE;
-        }
-    }
-
-    /* We're done! */
-    return SDL_TRUE;
-}
-
-struct lineSegment
-{
-	GLfloat x, y;
-	GLfloat r, g, b;
-};
-static uint8_t *rtl_buffer;
-static GLfloat *rtl_float_buffer;
-#define MAX_TIME_IN_GRAPH 24
-static lineSegment stuff[MAX_TIME_IN_GRAPH][1024];
-static int current_time = -1;
-static bool roll_time = false;
-static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
-static void QuitShaders()
-{
-    int i;
-
-    for (i = 0; i < NUM_SHADERS; ++i) {
-        DestroyShaderProgram(&shaders[i]);
-    }
-}
 
 /* Quick utility function for texture creation */
 static int
@@ -253,62 +74,6 @@ power_of_two(int input)
     return value;
 }
 
-GLuint
-SDL_GL_LoadTexture(SDL_Surface * surface, GLfloat * texcoord)
-{
-    GLuint texture;
-    int w, h;
-    SDL_Surface *image;
-    SDL_Rect area;
-    SDL_BlendMode saved_mode;
-
-    /* Use the surface width and height expanded to powers of 2 */
-    w = power_of_two(surface->w);
-    h = power_of_two(surface->h);
-    texcoord[0] = 0.0f;         /* Min X */
-    texcoord[1] = 0.0f;         /* Min Y */
-    texcoord[2] = (GLfloat) surface->w / w;     /* Max X */
-    texcoord[3] = (GLfloat) surface->h / h;     /* Max Y */
-
-    image = SDL_CreateRGBSurface(SDL_SWSURFACE, w, h, 32,
-#if SDL_BYTEORDER == SDL_LIL_ENDIAN     /* OpenGL RGBA masks */
-                                 0x000000FF,
-                                 0x0000FF00, 0x00FF0000, 0xFF000000
-#else
-                                 0xFF000000,
-                                 0x00FF0000, 0x0000FF00, 0x000000FF
-#endif
-        );
-    if (image == NULL) {
-        return 0;
-    }
-
-    /* Save the alpha blending attributes */
-    SDL_GetSurfaceBlendMode(surface, &saved_mode);
-    SDL_SetSurfaceBlendMode(surface, SDL_BLENDMODE_NONE);
-
-    /* Copy the surface into the GL texture image */
-    area.x = 0;
-    area.y = 0;
-    area.w = surface->w;
-    area.h = surface->h;
-    SDL_BlitSurface(surface, &area, image, &area);
-
-    /* Restore the alpha blending attributes */
-    SDL_SetSurfaceBlendMode(surface, saved_mode);
-
-    /* Create an OpenGL texture for the image */
-    glGenTextures(1, &texture);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MAG_FILTER, GL_NEAREST);
-    glTexParameteri(GL_TEXTURE_2D, GL_TEXTURE_MIN_FILTER, GL_NEAREST);
-    glTexImage2D(GL_TEXTURE_2D,
-                 0,
-                 GL_RGBA, w, h, 0, GL_RGBA, GL_UNSIGNED_BYTE, image->pixels);
-    SDL_FreeSurface(image);     /* No longer needed */
-
-    return texture;
-}
 
 /* A general OpenGL initialization function.    Sets all of the initial parameters. */
 void InitGL(int Width, int Height)                    /* We call this right after our OpenGL window is created. */
@@ -433,8 +198,6 @@ int check_events()
         int result = process_event(event);
         if(result == 1)
             return result;
-        if(result == 2)
-            current_shader = (current_shader + 1) % NUM_SHADERS;
     }
 }
 
@@ -537,26 +300,15 @@ int main(int argc, char **argv)
 		exit(2);
 	}
 
-	surface = SDL_LoadBMP("icon.bmp");
-	if ( ! surface ) {
-		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to load icon.bmp: %s\n", SDL_GetError());
-		SDL_Quit();
-		exit(3);
-	}
-	texture = SDL_GL_LoadTexture(surface, texcoords);
-	SDL_FreeSurface(surface);
 	GLenum err = glewInit();
 	InitGL(640, 480);
 	bind_buffer_to_gl(); 
-	if (InitShaders()) {
-		SDL_Log("Shaders supported, press SPACE to cycle them.\n");
-	} else {
-		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Shaders not supported!\n");
-	}
 	done = 0;
 	float fzoom = 44.5f;
-	float dzoom = 0.0f;
-	float mzoom = 45.1f;
+	float szoom = 0.1;
+	float dzoom = 0.1f;
+	float mzoom = 45.2f;
+	float mizoom = 20.0f;
 	while ( ! done ) {
 		int r;	
 		if(delta_freq != 0)
@@ -569,13 +321,13 @@ int main(int argc, char **argv)
 		}
 		r = rtl_read_buffer();
 		fzoom += dzoom;
-		if(fzoom <=0.0f)
+		if(fzoom <=mizoom)
 		{
-			dzoom = 0.2f;
-			fzoom = 0.0f;
+			dzoom = szoom;
+			fzoom = mizoom;
 		}else if(fzoom >= mzoom)
 		{
-			dzoom = -0.2f;
+			dzoom = -szoom;
 			fzoom = mzoom;
 		}
 		DrawGLScene(window, texture, texcoords,fzoom);
@@ -583,5 +335,4 @@ int main(int argc, char **argv)
 		if(r == 1)
 			done = 1;
 	}
-	QuitShaders();
 }

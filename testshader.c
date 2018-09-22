@@ -328,7 +328,7 @@ void InitGL(int Width, int Height)                    /* We call this right afte
 }
 
 /* The main drawing function. */
-void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
+void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float fzoom)
 {
     /* Texture coordinate lookup, to make it simple */
     enum {
@@ -371,11 +371,14 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
         glUseProgramObjectARB(0);
     }*/
    // glDisable(GL_TEXTURE_2D);
+    int start = 0+fzoom*10.0;
+    int end = 1023-fzoom*10.0;
     glBegin(GL_LINES); 
-    for(int i = 0; i<1024;++i)
+    for(int i = start; i<end;++i)
     {
-	    glColor3f(1.0f,0.0f,0.0f);            /* Set The Color To Red */
-	    glVertex3f( -2.5f+(i/100.0f), -1.0f+ stuff[i].y*2.0f, 0.0f);        /* Top */
+	    glColor3f(0.1f+0.3f*stuff[i].y,0.9f,0.4f-stuff[i].y*0.3f);            /* Set The Color To Red */
+	    glVertex3f( -2.5f+((i-start)/((end-start)/10.0f)), -1.5f+stuff[i].y*3.0f, 0.0f);        /* Top */
+	    glVertex3f( -2.5f+((i+1-start)/((end-start)/10.0f)), -1.5f+stuff[i+1].y*3.0f, 0.0f);        /* Top */
     }
     glEnd();
     /* swap buffers to display, since we're double buffered. */
@@ -408,7 +411,6 @@ int check_events()
         if(result == 2)
             current_shader = (current_shader + 1) % NUM_SHADERS;
     }
-    return 0;
 }
 
 
@@ -532,10 +534,23 @@ int main(int argc, char **argv)
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Shaders not supported!\n");
     }
     done = 0;
+    float fzoom = 1.0f;
+    float dzoom = 0.0f;
+    float mzoom = 45.1f;
     while ( ! done ) {
  	int r;	
 	r = rtl_read_buffer();
-        DrawGLScene(window, texture, texcoords);
+	fzoom += dzoom;
+	if(fzoom <=0.0f)
+	{
+		dzoom = 0.2f;
+		fzoom = 0.0f;
+	}else if(fzoom >= mzoom)
+	{
+		dzoom = -0.2f;
+		fzoom = mzoom;
+	}
+        DrawGLScene(window, texture, texcoords,fzoom);
         r = check_events();
         if(r == 1)
             done = 1;

@@ -18,7 +18,7 @@
 #include "convenience.h"
 
 #define DEFAULT_SAMPLE_RATE		2048000
-#define DEFAULT_BUF_LENGTH		(16 * 16384)
+#define DEFAULT_BUF_LENGTH		(1* 4096)
 #define MINIMAL_BUF_LENGTH		512
 #define MAXIMAL_BUF_LENGTH		(256 * 16384)
 
@@ -40,8 +40,6 @@ static SDL_bool shaders_supported;
 static int      current_shader = 0;
 enum {
     SHADER_COLOR,
-    SHADER_TEXTURE,
-    SHADER_TEXCOORDS,
     NUM_SHADERS
 };
 
@@ -58,72 +56,23 @@ static ShaderData shaders[NUM_SHADERS] = {
     /* SHADER_COLOR */
     { 0, 0, 0,
         /* vertex shader */
-"varying vec4 v_color;\n"
+	    "#version 130\n"
+"in vec2 x_pos;\n"
+"in vec3 x_color;\n"
+"out vec3 v_color;\n"
 "\n"
 "void main()\n"
 "{\n"
-"    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
-"    v_color = gl_Color;\n"
+"    gl_Position = vec4(x_pos.x,x_pos.y,0,1.0);\n"//gl_ModelViewProjectionMatrix * gl_Vertex;\n"
+"    v_color = x_color;\n"
 "}",
         /* fragment shader */
-"varying vec4 v_color;\n"
+"#version 130\n"
+"in vec3 v_color;\n"
 "\n"
 "void main()\n"
 "{\n"
-"    gl_FragColor = v_color;\n"
-"}"
-    },
-
-    /* SHADER_TEXTURE */
-    { 0, 0, 0,
-        /* vertex shader */
-"varying vec4 v_color;\n"
-"varying vec2 v_texCoord;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
-"    v_color = gl_Color;\n"
-"    v_texCoord = vec2(gl_MultiTexCoord0);\n"
-"}",
-        /* fragment shader */
-"varying vec4 v_color;\n"
-"varying vec2 v_texCoord;\n"
-"uniform sampler2D tex0;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_FragColor = texture2D(tex0, v_texCoord) * v_color;\n"
-"}"
-    },
-
-    /* SHADER_TEXCOORDS */
-    { 0, 0, 0,
-        /* vertex shader */
-"varying vec2 v_texCoord;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    gl_Position = gl_ModelViewProjectionMatrix * gl_Vertex;\n"
-"    v_texCoord = vec2(gl_MultiTexCoord0);\n"
-"}",
-        /* fragment shader */
-"varying vec2 v_texCoord;\n"
-"\n"
-"void main()\n"
-"{\n"
-"    vec4 color;\n"
-"    vec2 delta;\n"
-"    float dist;\n"
-"\n"
-"    delta = vec2(0.2, 0.6) - v_texCoord;\n"
-"    dist = dot(delta, delta);\n"
-"\n"
-"    color.r = v_texCoord.x;\n"
-"    color.g = v_texCoord.x * v_texCoord.y;\n"
-"    color.b = v_texCoord.y;\n"
-"    color.a = 1.0 - (dist * 4.0);\n"
-"    gl_FragColor = color;\n"
+"    gl_FragColor = vec4(v_color;\n"
 "}"
     },
 };
@@ -403,28 +352,27 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
     /* draw a textured square (quadrilateral) */
-    glEnable(GL_TEXTURE_2D);
+/*glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
-    glColor3f(1.0f,1.0f,1.0f);
+    glColor3f(1.0f,1.0f,1.0f);*/
     if (shaders_supported) {
         glUseProgramObjectARB(shaders[current_shader].program);
     }
-
-    glBegin(GL_QUADS);                /* start drawing a polygon (4 sided) */
-    glTexCoord2f(texcoord[MINX], texcoord[MINY]);
-    glVertex3f(-1.0f, 1.0f, 0.0f);        /* Top Left */
-    glTexCoord2f(texcoord[MAXX], texcoord[MINY]);
-    glVertex3f( 1.0f, 1.0f, 0.0f);        /* Top Right */
-    glTexCoord2f(texcoord[MAXX], texcoord[MAXY]);
-    glVertex3f( 1.0f,-1.0f, 0.0f);        /* Bottom Right */
-    glTexCoord2f(texcoord[MINX], texcoord[MAXY]);
-    glVertex3f(-1.0f,-1.0f, 0.0f);        /* Bottom Left */
-    glEnd();                    /* done with the polygon */
-
+    int num_verts = 250;
+    GLuint line_vao = 0;
+    GLuint line_vbo = 0;
+    glGenVertexArray(&line_vao);
+    glGenBuffer(&line_vbo);
+    glBindVertexArray(line_vao);
+    glBindBuffer(GL_ARRAY_BUFFER,line_vbo);
+    glBufferData(GL_ARRAY_BUFFER, sizeof(lineSegment)*250,&stuff[0],GL_DYNAMIC_DRAW);
+    glVertexAttribPointer(0, 5, GL_FLOAT, GL_FALSE, 0, 0);
+    glEnableVertexAttribArray(0);
+    glDrawArrays(GL_LINES,0,250);
     if (shaders_supported) {
         glUseProgramObjectARB(0);
     }
-    glDisable(GL_TEXTURE_2D);
+   // glDisable(GL_TEXTURE_2D);
 
     /* swap buffers to display, since we're double buffered. */
     SDL_GL_SwapWindow(window);
@@ -462,6 +410,12 @@ int check_events()
 
 static uint8_t *rtl_buffer;
 static GLfloat *rtl_float_buffer;
+struct lineSegment
+{
+	GLfloat x, y;
+	GLfloat r, g, b;
+};
+static lineSegment stuff[250];
 static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 
 int init_sdr()
@@ -497,13 +451,14 @@ int init_sdr()
 
 }
 
-GLuint rtl_gl_buffer;
+static GLuint rtl_gl_buffer;
 void bind_buffer_to_gl()
 {
-	GLuint index_buffer; // Save this for later rendering
 	glGenBuffers(1, &rtl_gl_buffer);
-	glBindBuffer(GL_ARRAY_BUFFER, rtl_gl_buffer);
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_STATIC_DRAW);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER, rtl_gl_buffer);
+	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_DYNAMIC_DRAW);
+	glBindBufferBase(GL_SHADER_STORAGE_BUFFER,3,rtl_gl_buffer);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);
 //glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 2, data_indices);
 }
 
@@ -512,16 +467,23 @@ int rtl_read_buffer()
 	int n_read;	
 	int r = rtlsdr_read_sync(dev, rtl_buffer, out_block_size, &n_read);
 	
-        char test_buffer[255];
-	int a = rtl_buffer[1];
-	int b = rtl_buffer[2];
-        SDL_snprintf(test_buffer, 250, "readed: %d first: %d last: %d\n", r, a, b);
-	SDL_Log(test_buffer);
 	for(int i = 0; i<out_block_size; ++i)
 	{
 		rtl_float_buffer[i] = rtl_buffer[i];
 	}
-	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_STATIC_DRAW);
+	for(int i = 0; i < 250; ++i)
+	{
+		stuff[i].x = i;
+		stuff[i].y = rtl_buffer[i]/255.0f;
+		stuff[i].r = 1.0f;
+		stuff[i].g = 1.0f-stuff[i].y;
+		stuff[i].b = 1.0f-stuff[i].x/250.0f;
+	}
+	/*glBindBuffer(GL_SHADER_STORAGE_BUFFER, rtl_gl_buffer);
+	GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
+	memcpy(p, rtl_float_buffer, sizeof(GLfloat)*out_block_size);
+	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
+	glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);*/
 	return r;
 }
 int main(int argc, char **argv)
@@ -563,8 +525,9 @@ int main(int argc, char **argv)
     }
     texture = SDL_GL_LoadTexture(surface, texcoords);
     SDL_FreeSurface(surface);
-
+	GLenum err = glewInit();
     InitGL(640, 480);
+    bind_buffer_to_gl(); 
     if (InitShaders()) {
         SDL_Log("Shaders supported, press SPACE to cycle them.\n");
     } else {

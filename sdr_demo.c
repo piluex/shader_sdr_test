@@ -35,6 +35,9 @@ static uint32_t samp_rate = DEFAULT_SAMPLE_RATE;
 static uint32_t total_samples = 0;
 static uint32_t dropped_samples = 0;
 static uint64_t curr_freq = 109000000;
+static GLfloat red_key = 1.0f;
+static GLfloat blue_key = 1.0f;
+static GLfloat green_key = 1.0f;
 
 struct lineSegment
 {
@@ -125,7 +128,7 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float f
 		for(int i = start; i<end;++i)
 		{
 			GLfloat minus = (MAX_TIME_IN_GRAPH*1.0-t)/(MAX_TIME_IN_GRAPH*1.0f);
-			glColor4f( minus, 1.0f, minus, minus);
+			glColor4f( 1.0-(red_key *minus), 1.0 - (green_key*minus), 1.0-(red_key*minus), minus);
 			GLfloat depth = -(1.0f*(t+0.01f)/8.0f);
 			glVertex3f( -2.5f+((i-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i].y*3.0f, depth);
 			glVertex3f( -2.5f+((i+1-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i+1].y*3.0f, depth);
@@ -165,6 +168,12 @@ int process_event(SDL_Event &event)
 		case SDLK_UP:
 			delta_freq += 1000;
 			break;
+		case SDLK_COMMA:
+			delta_freq -= 100000;
+			break;
+		case SDLK_PERIOD:
+			delta_freq += 100000;
+			break;
 		default:
 			break;
 	}
@@ -183,6 +192,12 @@ int process_event(SDL_Event &event)
 			break;
 		case SDLK_UP:
 			delta_freq -= 1000;
+			break;
+		case SDLK_COMMA:
+			delta_freq += 100000;
+			break;
+		case SDLK_PERIOD:
+			delta_freq -= 100000;
 			break;
 		default:
 			break;
@@ -269,6 +284,24 @@ int rtl_read_buffer()
 	current_time = future;
 	return r;
 }
+
+float frand()
+{
+	return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
+
+}
+
+void random_keys()
+{
+	float r = frand(); 
+	if(r < 0.42/2)
+	{
+		red_key = frand();
+		green_key = frand();
+		blue_key = frand();
+	}
+}
+
 int main(int argc, char **argv)
 {
 	int r = init_sdr();
@@ -305,11 +338,13 @@ int main(int argc, char **argv)
 	bind_buffer_to_gl(); 
 	done = 0;
 	float fzoom = 44.5f;
-	float szoom = 0.1;
-	float dzoom = 0.1f;
-	float mzoom = 45.2f;
-	float mizoom = 20.0f;
+	float szoom = 0.2f;
+	float dzoom = 0.2f;
+	float mzoom = 47.2f;
+	float mizoom = 23.0f;
+	
 	while ( ! done ) {
+		random_keys();
 		int r;	
 		if(delta_freq != 0)
 		{
@@ -320,7 +355,7 @@ int main(int argc, char **argv)
 			SDL_Log(cbufff);
 		}
 		r = rtl_read_buffer();
-		fzoom += dzoom;
+		fzoom += dzoom/(fzoom/mzoom);
 		if(fzoom <=mizoom)
 		{
 			dzoom = szoom;

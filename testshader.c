@@ -17,7 +17,7 @@
 
 #include "convenience.h"
 
-#define DEFAULT_SAMPLE_RATE		2048000
+#define DEFAULT_SAMPLE_RATE		248000
 #define DEFAULT_BUF_LENGTH		(1* 4096)
 #define MINIMAL_BUF_LENGTH		512
 #define MAXIMAL_BUF_LENGTH		(256 * 16384)
@@ -219,6 +219,15 @@ static SDL_bool InitShaders()
     return SDL_TRUE;
 }
 
+struct lineSegment
+{
+	GLfloat x, y;
+	GLfloat r, g, b;
+};
+static uint8_t *rtl_buffer;
+static GLfloat *rtl_float_buffer;
+static lineSegment stuff[1024];
+static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 static void QuitShaders()
 {
     int i;
@@ -332,22 +341,11 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
     glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);        /* Clear The Screen And The Depth Buffer */
     glLoadIdentity();                /* Reset The View */
 
-    glTranslatef(-1.5f,0.0f,0.0f);        /* Move Left 1.5 Units */
-
-    /* draw a triangle (in smooth coloring mode) */
-    glBegin(GL_POLYGON);                /* start drawing a polygon */
-    glColor3f(1.0f,0.0f,0.0f);            /* Set The Color To Red */
-    glVertex3f( 0.0f, 1.0f, 0.0f);        /* Top */
-    glColor3f(0.0f,1.0f,0.0f);            /* Set The Color To Green */
-    glVertex3f( 1.0f,-1.0f, 0.0f);        /* Bottom Right */
-    glColor3f(0.0f,0.0f,1.0f);            /* Set The Color To Blue */
-    glVertex3f(-1.0f,-1.0f, 0.0f);        /* Bottom Left */
-    glEnd();                    /* we're done with the polygon (smooth color interpolation) */
-
-    glTranslatef(3.0f,0.0f,0.0f);         /* Move Right 3 Units */
+    glTranslatef(-2.5f,0.0f,0.0f);        /* Move Left 1.5 Units */
+    //glTranslatef(3.0f,0.0f,0.0f);         /* Move Right 3 Units */
 
     /* Enable blending */
-    glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
+    //glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
     glEnable(GL_BLEND);
     glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 
@@ -355,14 +353,14 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
 /*glEnable(GL_TEXTURE_2D);
     glBindTexture(GL_TEXTURE_2D, texture);
     glColor3f(1.0f,1.0f,1.0f);*/
-    if (shaders_supported) {
+    /*if (shaders_supported) {
         glUseProgramObjectARB(shaders[current_shader].program);
     }
     int num_verts = 250;
     GLuint line_vao = 0;
     GLuint line_vbo = 0;
-    glGenVertexArray(&line_vao);
-    glGenBuffer(&line_vbo);
+    glGenVertexArrays(&line_vao,1);
+    glGenBuffers(&line_vbo,1);
     glBindVertexArray(line_vao);
     glBindBuffer(GL_ARRAY_BUFFER,line_vbo);
     glBufferData(GL_ARRAY_BUFFER, sizeof(lineSegment)*250,&stuff[0],GL_DYNAMIC_DRAW);
@@ -371,9 +369,15 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord)
     glDrawArrays(GL_LINES,0,250);
     if (shaders_supported) {
         glUseProgramObjectARB(0);
-    }
+    }*/
    // glDisable(GL_TEXTURE_2D);
-
+    glBegin(GL_LINES); 
+    for(int i = 0; i<1024;++i)
+    {
+	    glColor3f(1.0f,0.0f,0.0f);            /* Set The Color To Red */
+	    glVertex3f( -2.5f+(i/100.0f), -1.0f+ stuff[i].y*2.0f, 0.0f);        /* Top */
+    }
+    glEnd();
     /* swap buffers to display, since we're double buffered. */
     SDL_GL_SwapWindow(window);
 }
@@ -408,15 +412,6 @@ int check_events()
 }
 
 
-static uint8_t *rtl_buffer;
-static GLfloat *rtl_float_buffer;
-struct lineSegment
-{
-	GLfloat x, y;
-	GLfloat r, g, b;
-};
-static lineSegment stuff[250];
-static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 
 int init_sdr()
 {
@@ -444,8 +439,11 @@ int init_sdr()
 	
 	verbose_set_sample_rate(dev, samp_rate);
 
-	r = rtlsdr_set_testmode(dev, 1);
+	r = rtlsdr_set_testmode(dev, 0);
 
+	rtlsdr_set_tuner_gain_mode(dev,0);
+	rtlsdr_set_center_freq(dev,101700000);	
+	rtlsdr_set_tuner_bandwidth(dev,22000);
 	verbose_reset_buffer(dev);
 	return r;
 
@@ -471,10 +469,10 @@ int rtl_read_buffer()
 	{
 		rtl_float_buffer[i] = rtl_buffer[i];
 	}
-	for(int i = 0; i < 250; ++i)
+	for(int i = 0; i < 1024; ++i)
 	{
 		stuff[i].x = i;
-		stuff[i].y = rtl_buffer[i]/255.0f;
+		stuff[i].y = ((float)rtl_buffer[i])/250.0f;
 		stuff[i].r = 1.0f;
 		stuff[i].g = 1.0f-stuff[i].y;
 		stuff[i].b = 1.0f-stuff[i].x/250.0f;
@@ -504,7 +502,7 @@ int main(int argc, char **argv)
         exit(1);
     }
 
-    window = SDL_CreateWindow( "RTL Shader DEMO", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_OPENGL );
+    window = SDL_CreateWindow( "RTL DEMO", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 640, 480, SDL_WINDOW_OPENGL );
     if ( !window ) {
         SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to create OpenGL window: %s\n", SDL_GetError());
         SDL_Quit();

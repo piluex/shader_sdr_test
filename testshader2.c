@@ -34,6 +34,7 @@ static uint32_t samp_rate = DEFAULT_SAMPLE_RATE;
 
 static uint32_t total_samples = 0;
 static uint32_t dropped_samples = 0;
+static uint64_t curr_freq = 101500000;
 
 /* Shader vars */
 static SDL_bool shaders_supported;
@@ -226,7 +227,7 @@ struct lineSegment
 };
 static uint8_t *rtl_buffer;
 static GLfloat *rtl_float_buffer;
-#define MAX_TIME_IN_GRAPH 16
+#define MAX_TIME_IN_GRAPH 24
 static lineSegment stuff[MAX_TIME_IN_GRAPH][1024];
 static int current_time = -1;
 static bool roll_time = false;
@@ -325,7 +326,7 @@ void InitGL(int Width, int Height)                    /* We call this right afte
     glLoadIdentity();                /* Reset The Projection Matrix */
 
     aspect = (GLdouble)Width / Height;
-    glOrtho(-3.0, 3.0, -3.0 / aspect, 3.0 / aspect, -2.5, 2.5);
+    glOrtho(-3.0, 3.0, -3.0 / aspect, 3.0 / aspect, -3.0, 3.0);
 
     glMatrixMode(GL_MODELVIEW);
 }
@@ -333,60 +334,34 @@ void InitGL(int Width, int Height)                    /* We call this right afte
 /* The main drawing function. */
 void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float fzoom)
 {
-    /* Texture coordinate lookup, to make it simple */
-    enum {
-        MINX,
-        MINY,
-        MAXX,
-        MAXY
-    };
+	/* Texture coordinate lookup, to make it simple */
+	enum {
+		MINX,
+		MINY,
+		MAXX,
+		MAXY
+	};
 
-    glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);        /* Clear The Screen And The Depth Buffer */
-    glLoadIdentity();                /* Reset The View */
-    glRotatef(35.264f, 1.0f, 0.0f, 0.0f);
-    glRotatef(-45.0f, 0.0f, 1.0f, 0.0f);
-    glTranslatef(-2.5f,0.0f,0.0f);        /* Move Left 1.5 Units */
-    //glTranslatef(3.0f,0.0f,0.0f);         /* Move Right 3 Units */
+    glEnable(GL_BLEND);
+    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);        /* Clear The Screen And The Depth Buffer */
+	glLoadIdentity();                /* Reset The View */
+	glRotatef(33.264f, 1.0f, 0.0f, 0.0f);
+	glRotatef(-40.0f, 0.0f, 1.0f, 0.0f);
+	glTranslatef(-2.5f,0.0f,0.0f);        /* Move Left 1.5 Units */
 
-    /* Enable blending */
-    //glTexEnvf(GL_TEXTURE_ENV, GL_TEXTURE_ENV_MODE, GL_MODULATE);
-	glEnable(GL_BLEND);
-	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
-
-    /* draw a textured square (quadrilateral) */
-/*glEnable(GL_TEXTURE_2D);
-    glBindTexture(GL_TEXTURE_2D, texture);
-    glColor3f(1.0f,1.0f,1.0f);*/
-    /*if (shaders_supported) {
-        glUseProgramObjectARB(shaders[current_shader].program);
-    }
-    int num_verts = 250;
-    GLuint line_vao = 0;
-    GLuint line_vbo = 0;
-    glGenVertexArrays(&line_vao,1);
-    glGenBuffers(&line_vbo,1);
-    glBindVertexArray(line_vao);
-    glBindBuffer(GL_ARRAY_BUFFER,line_vbo);
-    glBufferData(GL_ARRAY_BUFFER, sizeof(lineSegment)*250,&stuff[0],GL_DYNAMIC_DRAW);
-    glVertexAttribPointer(0, 5, GL_FLOAT, GL_FALSE, 0, 0);
-    glEnableVertexAttribArray(0);
-    glDrawArrays(GL_LINES,0,250);
-    if (shaders_supported) {
-        glUseProgramObjectARB(0);
-    }*/
-   // glDisable(GL_TEXTURE_2D);
 	int time_to_render = roll_time? MAX_TIME_IN_GRAPH : current_time;
 	int c_t = current_time;
 	for(int t = 0; t<time_to_render;t++)
 	{
-		int start = 0+fzoom*10.0;
-		int end = 1023-fzoom*10.0;
+		int start = 0 + fzoom*10.0;
+		int end = 1023 - fzoom*10.0;
 		glBegin(GL_LINES); 
 		for(int i = start; i<end;++i)
 		{
-			GLfloat minus = (16.0f-t)/16.0f;
+			GLfloat minus = (MAX_TIME_IN_GRAPH*1.0-t)/(MAX_TIME_IN_GRAPH*1.0f);
 			glColor4f( minus, 1.0f, minus, minus);
-			GLfloat depth = -(1.0f*(t+0.01f)/7.0f);
+			GLfloat depth = -(1.0f*(t+0.01f)/8.0f);
 			glVertex3f( -2.5f+((i-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i].y*3.0f, depth);
 			glVertex3f( -2.5f+((i+1-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i+1].y*3.0f, depth);
 		}
@@ -395,22 +370,58 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float f
 		if(c_t < 0)
 			c_t = MAX_TIME_IN_GRAPH - 1;
 	}
-	/* swap buffers to display, since we're double buffered. */
 	SDL_GL_SwapWindow(window);
 }
 
+int delta_freq = 0;
 int process_event(SDL_Event &event)
 {
     if ( event.type == SDL_QUIT ) {
         return 1;
     }
-    if ( event.type == SDL_KEYDOWN ) {
+    if ( event.type == SDL_KEYDOWN && event.key.repeat == 0 ) {
         if ( event.key.keysym.sym == SDLK_SPACE ) {
             return 2;
         }
         if ( event.key.keysym.sym == SDLK_ESCAPE ) {
             return 1;    
         }
+	switch (event.key.keysym.sym)
+	{
+		case SDLK_LEFT:
+			delta_freq -= 10000;
+			break;
+		case SDLK_RIGHT:
+			delta_freq += 10000;
+			break;
+		case SDLK_DOWN:
+			delta_freq -= 1000;
+			break;
+		case SDLK_UP:
+			delta_freq += 1000;
+			break;
+		default:
+			break;
+	}
+    }else if( event.type == SDL_KEYUP)
+    {
+	switch (event.key.keysym.sym)
+	{
+		case SDLK_LEFT:
+			delta_freq += 10000;
+			break;
+		case SDLK_RIGHT:
+			delta_freq -= 10000;
+			break;
+		case SDLK_DOWN:
+			delta_freq += 1000;
+			break;
+		case SDLK_UP:
+			delta_freq -= 1000;
+			break;
+		default:
+			break;
+	}
     }
     return 0;
 }
@@ -428,7 +439,6 @@ int check_events()
 }
 
 
-
 int init_sdr()
 {
 	int r, opt, i;
@@ -439,7 +449,6 @@ int init_sdr()
 	int gains[100];
 
 	rtl_buffer = malloc(out_block_size * sizeof(uint8_t));
-	rtl_float_buffer = malloc(out_block_size * sizeof(GLfloat));
 
 	dev_index = verbose_device_search("0");
 
@@ -458,7 +467,7 @@ int init_sdr()
 	r = rtlsdr_set_testmode(dev, 0);
 
 	rtlsdr_set_tuner_gain_mode(dev,0);
-	rtlsdr_set_center_freq(dev,101700000);	
+	rtlsdr_set_center_freq(dev,curr_freq);	
 	rtlsdr_set_tuner_bandwidth(dev,22000);
 	verbose_reset_buffer(dev);
 	return r;
@@ -468,12 +477,6 @@ int init_sdr()
 static GLuint rtl_gl_buffer;
 void bind_buffer_to_gl()
 {
-	glGenBuffers(1, &rtl_gl_buffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER, rtl_gl_buffer);
-	glBufferData(GL_SHADER_STORAGE_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_DYNAMIC_DRAW);
-	glBindBufferBase(GL_SHADER_STORAGE_BUFFER,3,rtl_gl_buffer);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);
-//glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 2, data_indices);
 }
 
 int future_time()
@@ -490,6 +493,7 @@ int future_time()
 int rtl_read_buffer()
 {
 	int n_read;	
+
 	int r = rtlsdr_read_sync(dev, rtl_buffer, out_block_size, &n_read);
 	
 	int future = future_time();
@@ -500,11 +504,6 @@ int rtl_read_buffer()
 		stuff[future][i].y = ((float)rtl_buffer[i])/255.0f;
 	}
 	current_time = future;
-	/*glBindBuffer(GL_SHADER_STORAGE_BUFFER, rtl_gl_buffer);
-	GLvoid* p = glMapBuffer(GL_SHADER_STORAGE_BUFFER, GL_WRITE_ONLY);
-	memcpy(p, rtl_float_buffer, sizeof(GLfloat)*out_block_size);
-	glUnmapBuffer(GL_SHADER_STORAGE_BUFFER);
-	glBindBuffer(GL_SHADER_STORAGE_BUFFER,0);*/
 	return r;
 }
 int main(int argc, char **argv)
@@ -555,11 +554,19 @@ int main(int argc, char **argv)
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Shaders not supported!\n");
 	}
 	done = 0;
-	float fzoom = 40.0f;
+	float fzoom = 44.5f;
 	float dzoom = 0.0f;
 	float mzoom = 45.1f;
 	while ( ! done ) {
 		int r;	
+		if(delta_freq != 0)
+		{
+			curr_freq += delta_freq;
+			char cbufff[42];
+			SDL_snprintf(cbufff,42,"Current frequency %d Hz\n", curr_freq);
+			rtlsdr_set_center_freq(dev,curr_freq);	
+			SDL_Log(cbufff);
+		}
 		r = rtl_read_buffer();
 		fzoom += dzoom;
 		if(fzoom <=0.0f)

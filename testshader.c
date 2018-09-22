@@ -2,6 +2,7 @@
 #define HAVE_OPENGL
 #include "SDL2/SDL.h"
 
+#include "GL/glew.h"
 #include "SDL2/SDL_opengl.h"
 
 /* RTL-SDR */
@@ -458,17 +459,22 @@ int check_events()
     return 0;
 }
 
+
+static uint8_t *rtl_buffer;
+static GLfloat *rtl_float_buffer;
+static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
+
 int init_sdr()
 {
-	int n_read, r, opt, i;
+	int r, opt, i;
 	int sync_mode = 0;
 	uint8_t *buffer;
 	int dev_index = 0;
-	uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 	int count;
 	int gains[100];
 
-	buffer = malloc(out_block_size * sizeof(uint8_t));
+	rtl_buffer = malloc(out_block_size * sizeof(uint8_t));
+	rtl_float_buffer = malloc(out_block_size * sizeof(GLfloat));
 
 	dev_index = verbose_device_search("0");
 
@@ -484,9 +490,40 @@ int init_sdr()
 	
 	verbose_set_sample_rate(dev, samp_rate);
 
-	return 0;
+	r = rtlsdr_set_testmode(dev, 1);
+
+	verbose_reset_buffer(dev);
+	return r;
+
 }
 
+GLuint rtl_gl_buffer;
+void bind_buffer_to_gl()
+{
+	GLuint index_buffer; // Save this for later rendering
+	glGenBuffers(1, &rtl_gl_buffer);
+	glBindBuffer(GL_ARRAY_BUFFER, rtl_gl_buffer);
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_STATIC_DRAW);
+//glBufferSubData(GL_ELEMENT_ARRAY_BUFFER, 0, 2, data_indices);
+}
+
+int rtl_read_buffer()
+{
+	int n_read;	
+	int r = rtlsdr_read_sync(dev, rtl_buffer, out_block_size, &n_read);
+	
+        char test_buffer[255];
+	int a = rtl_buffer[1];
+	int b = rtl_buffer[2];
+        SDL_snprintf(test_buffer, 250, "readed: %d first: %d last: %d\n", r, a, b);
+	SDL_Log(test_buffer);
+	for(int i = 0; i<out_block_size; ++i)
+	{
+		rtl_float_buffer[i] = rtl_buffer[i];
+	}
+	glBufferData(GL_ARRAY_BUFFER, sizeof(GLfloat)*out_block_size, rtl_float_buffer, GL_STATIC_DRAW);
+	return r;
+}
 int main(int argc, char **argv)
 {
 	int r = init_sdr();
@@ -535,8 +572,10 @@ int main(int argc, char **argv)
     }
     done = 0;
     while ( ! done ) {
+ 	int r;	
+	r = rtl_read_buffer();
         DrawGLScene(window, texture, texcoords);
-        int r = check_events();
+        r = check_events();
         if(r == 1)
             done = 1;
     }

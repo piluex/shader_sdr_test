@@ -34,7 +34,7 @@ static uint32_t samp_rate = DEFAULT_SAMPLE_RATE;
 
 static uint32_t total_samples = 0;
 static uint32_t dropped_samples = 0;
-static uint64_t curr_freq = 906000000;
+static uint64_t curr_freq = 109000000;
 static GLfloat red_key = 1.0f;
 static GLfloat blue_key = 1.0f;
 static GLfloat green_key = 1.0f;
@@ -79,6 +79,7 @@ power_of_two(int input)
 
 
 static float rotate_a = 15.0f;
+static float rotate_b = 35.0f;
 
 /* A general OpenGL initialization function.    Sets all of the initial parameters. */
 void InitGL(int Width, int Height)                    /* We call this right after our OpenGL window is created. */
@@ -102,7 +103,7 @@ void InitGL(int Width, int Height)                    /* We call this right afte
 }
 
 /* The main drawing function. */
-void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float fzoom)
+void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float fzoom, float zzoom)
 {
 	/* Texture coordinate lookup, to make it simple */
 	enum {
@@ -112,12 +113,12 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float f
 		MAXY
 	};
 
-    glEnable(GL_BLEND);
-    glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
+	glEnable(GL_BLEND);
+	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
 	glClear(GL_COLOR_BUFFER_BIT | GL_DEPTH_BUFFER_BIT);        /* Clear The Screen And The Depth Buffer */
 	glLoadIdentity();                /* Reset The View */
 	glRotatef(rotate_a, 1.0f, 0.0f, 0.0f);
-	glRotatef(-40.0f, 0.0f, 1.0f, 0.0f);
+	glRotatef(rotate_b, 0.0f, 1.0f, 0.0f);
 	glTranslatef(-2.5f,0.0f,0.0f);        /* Move Left 1.5 Units */
 
 	int time_to_render = roll_time? MAX_TIME_IN_GRAPH : current_time;
@@ -130,8 +131,8 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float f
 		for(int i = start; i<end;++i)
 		{
 			GLfloat minus = (1.0*t)/(MAX_TIME_IN_GRAPH*1.0f);
-			glColor4f( 1.0-(red_key *minus*1.5), 1.0 - (green_key*minus*1.5), 1.0-(blue_key*minus*1.5), 1.0-minus*0.75);
-			GLfloat depth = 1.5-(1.0f*(t+0.01f)/6.0f);
+			glColor4f( 1.0-(red_key *minus*1.6), 1.0 - (green_key*minus*1.6), 1.0-(blue_key*minus*1.6), 1.0-minus*0.85);
+			GLfloat depth = 1.5-(1.0f*(t+0.01f)/(6.6f*zzoom));
 			glVertex3f( -2.5f+((i-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i].y*3.0f, depth);
 			glVertex3f( -2.5f+((i+1-start)/((end-start)/10.0f)), -1.5f+stuff[c_t][i+1].y*3.0f, depth);
 		}
@@ -296,11 +297,17 @@ float frand()
 void random_keys()
 {
 	float r = frand(); 
-	if(r < 0.42/2)
+	if(r < 0.1)
 	{
 		red_key = frand();
 		green_key = frand();
 		blue_key = frand();
+		while((red_key+green_key+blue_key) < 0.77)
+		{
+			red_key = frand();
+			green_key = frand();
+			blue_key = frand();
+		}
 	}
 }
 
@@ -322,7 +329,7 @@ int main(int argc, char **argv)
 		exit(1);
 	}
 
-	window = SDL_CreateWindow( "RTL DEMO", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 800, 600, SDL_WINDOW_OPENGL );
+	window = SDL_CreateWindow( "RTL DEMO", SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED, 1366, 768, SDL_WINDOW_OPENGL );
 	if ( !window ) {
 		SDL_LogError(SDL_LOG_CATEGORY_APPLICATION, "Unable to create OpenGL window: %s\n", SDL_GetError());
 		SDL_Quit();
@@ -334,30 +341,38 @@ int main(int argc, char **argv)
 		SDL_Quit();
 		exit(2);
 	}
-
+	SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
+	SDL_GL_SetSwapInterval(1);
 	GLenum err = glewInit();
-	InitGL(800, 600);
-	bind_buffer_to_gl(); 
+	InitGL(1366, 768);
 	done = 0;
 	float fzoom = 44.5f;
-	float szoom = 0.2f;
-	float dzoom = 0.2f;
+	float szoom = 0.5f;
+	float dzoom = 0.5f;
 	float mzoom = 47.2f;
-	float mizoom = 23.0f;
+	float mizoom = 15.0f;
+
+	float zzoom = 1.0f;
+	float szzoom = 0.02f;
+	float minzzoom = 0.72f;
+	float maxzzoom = 1.35f;
 	
-	float rotate_min = -45.0f;
-	float rotate_max = 45.0f;
+	SDL_GL_SetSwapInterval(1);
+	float rotate_min = -65.0f;
+	float rotate_max = 65.0f;
 	float rotate_move = 0.2f;
+	float rotate_move_b = 0.2f;
 	while ( ! done ) {
-		if(frand() > 0.88)
+		if(frand() > 0.89)
 		{
-			rotate_move = (0.5f-frand())*1.5;
+			rotate_move = (0.5f-frand())*2.0;
 		}
 		rotate_a += rotate_move;
+		rotate_b += rotate_move_b;
 		if((rotate_a >= rotate_max) || (rotate_a <= rotate_min))
-		{
 			rotate_move = - rotate_move;
-		}
+		if((rotate_b >= rotate_max) || (rotate_b <= rotate_min))
+			rotate_move_b = - rotate_move_b;
 		random_keys();
 		int r;	
 		if(delta_freq != 0)
@@ -372,14 +387,19 @@ int main(int argc, char **argv)
 		fzoom += dzoom/(fzoom/mzoom);
 		if(fzoom <=mizoom)
 		{
-			dzoom = szoom;
+			dzoom = frand()*szoom;
 			fzoom = mizoom;
 		}else if(fzoom >= mzoom)
 		{
-			dzoom = -szoom;
+			dzoom = -szoom*frand();
 			fzoom = mzoom;
 		}
-		DrawGLScene(window, texture, texcoords,fzoom);
+		zzoom += szzoom;
+		if(zzoom>maxzzoom)
+			szzoom = frand()*-0.021;
+		else if(zzoom<minzzoom)
+			szzoom = frand()*0.021;
+		DrawGLScene(window, texture, texcoords,fzoom, zzoom);
 		r = check_events();
 		if(r == 1)
 			done = 1;

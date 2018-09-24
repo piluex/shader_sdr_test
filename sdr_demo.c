@@ -392,6 +392,7 @@ int main(int argc, char **argv)
 		r = rtl_read_buffer();
 
 		random_color_keys();
+		random_rotation_control();
 		random_zoom_control();
 
 		if(delta_freq != 0)

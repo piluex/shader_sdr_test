@@ -45,7 +45,7 @@ struct lineSegment
 static uint8_t *rtl_buffer;
 #define MAX_TIME_IN_GRAPH 42
 /* stuff works as a circular buffer */
-static lineSegment stuff[MAX_TIME_IN_GRAPH][1024];
+static lineSegment stuff[MAX_TIME_IN_GRAPH][MAX_RADIO_RESOLUTION];
 static int current_time = -1;
 static bool roll_time = false;
 static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
@@ -392,6 +392,7 @@ int main(int argc, char **argv)
 		r = rtl_read_buffer();
 
 		random_color_keys();
+		random_zoom_control();
 
 		if(delta_freq != 0)
 		{
@@ -401,6 +402,6 @@ int main(int argc, char **argv)
 			rtlsdr_set_center_freq(dev,curr_freq);	
 			SDL_Log(cbufff);
 		}
-		DrawGLScene(window, texture, texcoords,fzoom, zzoom);
+		DrawGLScene(window, texture, texcoords, fzoom, zzoom);
 	}
 }

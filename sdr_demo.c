@@ -17,8 +17,9 @@
 
 #include "convenience.h"
 
+#define MAX_RADIO_RESOLUTION 1024
 #define DEFAULT_SAMPLE_RATE		248000
-#define DEFAULT_BUF_LENGTH		(1* 4096)
+#define DEFAULT_BUF_LENGTH		(1* MAX_RADIO_RESOLUTION)
 #define MINIMAL_BUF_LENGTH		512
 #define MAXIMAL_BUF_LENGTH		(256 * 16384)
 
@@ -35,9 +36,7 @@ static uint32_t samp_rate = DEFAULT_SAMPLE_RATE;
 static uint32_t total_samples = 0;
 static uint32_t dropped_samples = 0;
 static uint64_t curr_freq = 109000000;
-static GLfloat red_key = 1.0f;
-static GLfloat blue_key = 1.0f;
-static GLfloat green_key = 1.0f;
+static int32_t delta_freq = 0;
 
 struct lineSegment
 {
@@ -45,11 +44,39 @@ struct lineSegment
 };
 static uint8_t *rtl_buffer;
 #define MAX_TIME_IN_GRAPH 42
+/* stuff works as a circular buffer */
 static lineSegment stuff[MAX_TIME_IN_GRAPH][1024];
 static int current_time = -1;
 static bool roll_time = false;
 static uint32_t out_block_size = DEFAULT_BUF_LENGTH;
 
+
+/*****
+ *   VISUAL CONTROLS  *
+                  *****/
+
+static float rotate_a = 15.0f;
+static float rotate_b = 35.0f;
+static float rotate_move_a = 0.2f;
+static float rotate_move_b = 0.2f;
+static float rotate_min = -65.0f;
+static float rotate_max = 65.0f;
+
+/*freq zoom*/
+static float fzoom = 44.5f;
+static float szoom = 0.5f;
+static float dzoom = 0.5f;
+static float mzoom = 47.2f;
+static float mizoom = 15.0f;
+/*depth zoom*/
+static float zzoom = 1.0f;
+static float szzoom = 0.02f;
+static float minzzoom = 0.72f;
+static float maxzzoom = 1.35f;
+
+static GLfloat red_key = 1.0f;
+static GLfloat blue_key = 1.0f;
+static GLfloat green_key = 1.0f;
 
 static PFNGLATTACHOBJECTARBPROC glAttachObjectARB;
 static PFNGLCOMPILESHADERARBPROC glCompileShaderARB;
@@ -65,21 +92,11 @@ static PFNGLUNIFORM1IARBPROC glUniform1iARB;
 static PFNGLUSEPROGRAMOBJECTARBPROC glUseProgramObjectARB;
 
 
-/* Quick utility function for texture creation */
-static int
-power_of_two(int input)
+
+float frand()
 {
-    int value = 1;
-
-    while (value < input) {
-        value <<= 1;
-    }
-    return value;
+	return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
 }
-
-
-static float rotate_a = 15.0f;
-static float rotate_b = 35.0f;
 
 /* A general OpenGL initialization function.    Sets all of the initial parameters. */
 void InitGL(int Width, int Height)                    /* We call this right after our OpenGL window is created. */
@@ -102,16 +119,8 @@ void InitGL(int Width, int Height)                    /* We call this right afte
     glMatrixMode(GL_MODELVIEW);
 }
 
-/* The main drawing function. */
 void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float fzoom, float zzoom)
 {
-	/* Texture coordinate lookup, to make it simple */
-	enum {
-		MINX,
-		MINY,
-		MAXX,
-		MAXY
-	};
 
 	glEnable(GL_BLEND);
 	glBlendFunc(GL_SRC_ALPHA, GL_ONE_MINUS_SRC_ALPHA);
@@ -144,7 +153,72 @@ void DrawGLScene(SDL_Window *window, GLuint texture, GLfloat * texcoord, float f
 	SDL_GL_SwapWindow(window);
 }
 
-int delta_freq = 0;
+
+int init_sdr()
+{
+	int r, opt, i;
+	int sync_mode = 0;
+	uint8_t *buffer;
+	int dev_index = 0;
+	int count;
+	int gains[100];
+
+	rtl_buffer = malloc(out_block_size * sizeof(uint8_t));
+
+	dev_index = verbose_device_search("0");
+
+	if (dev_index < 0) {
+		return -1;
+	}
+
+	r = rtlsdr_open(&dev, (uint32_t)dev_index);
+	if (r < 0) {
+		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
+		return -1;
+	}
+	
+	verbose_set_sample_rate(dev, samp_rate);
+
+	r = rtlsdr_set_testmode(dev, 0);
+
+	rtlsdr_set_tuner_gain_mode(dev,0);
+	rtlsdr_set_center_freq(dev,curr_freq);	
+	rtlsdr_set_tuner_bandwidth(dev,22000);
+	verbose_reset_buffer(dev);
+	return r;
+
+}
+
+int circular_future_time()
+{
+	int future = current_time + 1;
+	if(future >= MAX_TIME_IN_GRAPH)
+	{
+		future = 0;
+		roll_time = true;
+	}
+	return future;
+}
+
+int rtl_read_buffer()
+{
+	int n_read;	
+
+	int r = rtlsdr_read_sync(dev, rtl_buffer, out_block_size, &n_read);
+	
+	int future = circular_future_time();
+
+	for(int i = 0; i < 1024; ++i)
+	{
+		stuff[future][i].x = i;
+		stuff[future][i].y = ((float)rtl_buffer[i])/255.0f;
+	}
+	current_time = future;
+	return r;
+}
+
+
+
 int process_event(SDL_Event &event)
 {
     if ( event.type == SDL_QUIT ) {
@@ -219,82 +293,7 @@ int check_events()
     }
 }
 
-
-int init_sdr()
-{
-	int r, opt, i;
-	int sync_mode = 0;
-	uint8_t *buffer;
-	int dev_index = 0;
-	int count;
-	int gains[100];
-
-	rtl_buffer = malloc(out_block_size * sizeof(uint8_t));
-
-	dev_index = verbose_device_search("0");
-
-	if (dev_index < 0) {
-		return -1;
-	}
-
-	r = rtlsdr_open(&dev, (uint32_t)dev_index);
-	if (r < 0) {
-		fprintf(stderr, "Failed to open rtlsdr device #%d.\n", dev_index);
-		return -1;
-	}
-	
-	verbose_set_sample_rate(dev, samp_rate);
-
-	r = rtlsdr_set_testmode(dev, 0);
-
-	rtlsdr_set_tuner_gain_mode(dev,0);
-	rtlsdr_set_center_freq(dev,curr_freq);	
-	rtlsdr_set_tuner_bandwidth(dev,22000);
-	verbose_reset_buffer(dev);
-	return r;
-
-}
-
-static GLuint rtl_gl_buffer;
-void bind_buffer_to_gl()
-{
-}
-
-int future_time()
-{
-	int future = current_time + 1;
-	if(future >= MAX_TIME_IN_GRAPH)
-	{
-		future = 0;
-		roll_time = true;
-	}
-	return future;
-}
-
-int rtl_read_buffer()
-{
-	int n_read;	
-
-	int r = rtlsdr_read_sync(dev, rtl_buffer, out_block_size, &n_read);
-	
-	int future = future_time();
-
-	for(int i = 0; i < 1024; ++i)
-	{
-		stuff[future][i].x = i;
-		stuff[future][i].y = ((float)rtl_buffer[i])/255.0f;
-	}
-	current_time = future;
-	return r;
-}
-
-float frand()
-{
-	return static_cast <float> (rand()) / static_cast <float> (RAND_MAX);
-
-}
-
-void random_keys()
+void random_color_keys()
 {
 	float r = frand(); 
 	if(r < 0.1)
@@ -311,11 +310,47 @@ void random_keys()
 	}
 }
 
+void random_rotation_control()
+{
+	if(frand() > 0.89)
+		rotate_move_a = (0.5-frand())*2.0;
+	if(frand() > 0.89)
+		rotate_move_b = (0.5-frand())*2.0;
+
+	rotate_a += rotate_move_a;
+	rotate_b += rotate_move_b;
+
+	if((rotate_a >= rotate_max) || (rotate_a <= rotate_min))
+		rotate_move_a = - rotate_move_a;
+	if((rotate_b >= rotate_max) || (rotate_b <= rotate_min))
+		rotate_move_b = - rotate_move_b;
+}
+
+void random_zoom_control()
+{
+	fzoom += dzoom/(fzoom/mzoom);
+	if(fzoom <=mizoom)
+	{
+		dzoom = frand()*szoom;
+		fzoom = mizoom;
+	}else if(fzoom >= mzoom)
+	{
+		dzoom = -szoom*frand();
+		fzoom = mzoom;
+	}
+	zzoom += szzoom;
+	if(zzoom>maxzzoom)
+		szzoom = frand()*-0.021;
+	else if(zzoom<minzzoom)
+		szzoom = frand()*0.021;
+}
+
 int main(int argc, char **argv)
 {
 	int r = init_sdr();
 	if(r == -1)
 		return 1;
+
 	int done;
 	SDL_Window *window;
 	SDL_Surface *surface;
@@ -341,40 +376,23 @@ int main(int argc, char **argv)
 		SDL_Quit();
 		exit(2);
 	}
+
 	SDL_SetWindowFullscreen(window, SDL_WINDOW_FULLSCREEN);
 	SDL_GL_SetSwapInterval(1);
 	GLenum err = glewInit();
 	InitGL(1366, 768);
 	done = 0;
-	float fzoom = 44.5f;
-	float szoom = 0.5f;
-	float dzoom = 0.5f;
-	float mzoom = 47.2f;
-	float mizoom = 15.0f;
-
-	float zzoom = 1.0f;
-	float szzoom = 0.02f;
-	float minzzoom = 0.72f;
-	float maxzzoom = 1.35f;
 	
 	SDL_GL_SetSwapInterval(1);
-	float rotate_min = -65.0f;
-	float rotate_max = 65.0f;
-	float rotate_move = 0.2f;
-	float rotate_move_b = 0.2f;
 	while ( ! done ) {
-		if(frand() > 0.89)
-		{
-			rotate_move = (0.5f-frand())*2.0;
-		}
-		rotate_a += rotate_move;
-		rotate_b += rotate_move_b;
-		if((rotate_a >= rotate_max) || (rotate_a <= rotate_min))
-			rotate_move = - rotate_move;
-		if((rotate_b >= rotate_max) || (rotate_b <= rotate_min))
-			rotate_move_b = - rotate_move_b;
-		random_keys();
-		int r;	
+		int r;
+		r = check_events();
+		if(r == 1)
+			done = 1;
+		r = rtl_read_buffer();
+
+		random_color_keys();
+
 		if(delta_freq != 0)
 		{
 			curr_freq += delta_freq;
@@ -383,25 +401,6 @@ int main(int argc, char **argv)
 			rtlsdr_set_center_freq(dev,curr_freq);	
 			SDL_Log(cbufff);
 		}
-		r = rtl_read_buffer();
-		fzoom += dzoom/(fzoom/mzoom);
-		if(fzoom <=mizoom)
-		{
-			dzoom = frand()*szoom;
-			fzoom = mizoom;
-		}else if(fzoom >= mzoom)
-		{
-			dzoom = -szoom*frand();
-			fzoom = mzoom;
-		}
-		zzoom += szzoom;
-		if(zzoom>maxzzoom)
-			szzoom = frand()*-0.021;
-		else if(zzoom<minzzoom)
-			szzoom = frand()*0.021;
 		DrawGLScene(window, texture, texcoords,fzoom, zzoom);
-		r = check_events();
-		if(r == 1)
-			done = 1;
 	}
 }
